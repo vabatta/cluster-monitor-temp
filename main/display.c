@@ -12,11 +12,11 @@
 
 #include "display.h"
 
-static const char *TAG = "display_ctl";
+static const char *TAG = "display";
 
-i2c_master_dev_handle_t i2c_display_device = NULL;
+static i2c_master_dev_handle_t i2c_display_device = NULL;
 
-u8g2_t u8g2;
+static u8g2_t u8g2;
 
 uint8_t u8x8_gpio_and_delay_esp32(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int, void *arg_ptr) {
 	switch (msg) {
@@ -71,23 +71,19 @@ uint8_t u8x8_byte_esp32_i2c(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int, void *ar
 	return 1;
 }
 
-esp_err_t display_init(i2c_master_bus_handle_t i2c_bus_handle) {
+void display_init(i2c_master_bus_handle_t i2c_bus_handle) {
 	ESP_LOGI(TAG, "Initialising I2C display...");
 	i2c_device_config_t i2c_dev_config = {
 		.dev_addr_length = I2C_ADDR_BIT_LEN_7,
-		.device_address = I2C_DISPLAY_ADDRESS,
-		.scl_speed_hz = I2C_DISPLAY_FREQ_HZ,
+		.device_address = CONFIG_I2C_DISPLAY_ADDRESS,
+		.scl_speed_hz = CONFIG_I2C_DISPLAY_FREQ_HZ,
 		.scl_wait_us = 1000,
 		.flags = {
 			.disable_ack_check = false
 		}
 	};
 
-	esp_err_t err = i2c_master_bus_add_device(i2c_bus_handle, &i2c_dev_config, &i2c_display_device);
-	if (err != ESP_OK) {
-		ESP_LOGE(TAG, "Failed to add display to I2C bus (code %d)", err);
-		return err;
-	}
+	ESP_ERROR_CHECK(i2c_master_bus_add_device(i2c_bus_handle, &i2c_dev_config, &i2c_display_device));
 
 	u8g2_Setup_ssd1306_i2c_128x32_univision_f(&u8g2, U8G2_R0, u8x8_byte_esp32_i2c, u8x8_gpio_and_delay_esp32);
 	u8g2_InitDisplay(&u8g2);
@@ -102,24 +98,22 @@ esp_err_t display_init(i2c_master_bus_handle_t i2c_bus_handle) {
 	u8g2_SendBuffer(&u8g2);
 
 	ESP_LOGI(TAG, "I2C Display booted");
-	return ESP_OK;
 }
 
-static char number_str[10];
-
-void display_temperature(float temperature) {
+void display_info(char *info) {
 	u8g2_ClearBuffer(&u8g2);
 	u8g2_SetFont(&u8g2, u8g2_font_inb16_mr);
-	sprintf(number_str, "%2.0f", temperature);
-	u8g2_DrawStr(&u8g2, 28 + 0, 24, number_str);
+	u8g2_DrawStr(&u8g2, 28, 24, info);
 	u8g2_SendBuffer(&u8g2);
 }
 
-void display_humidity(float humidity) {
+static char number_str[8];
+
+void display_sensor(float temperature, float humidity) {
 	u8g2_ClearBuffer(&u8g2);
 	u8g2_SetFont(&u8g2, u8g2_font_inb16_mr);
-	sprintf(number_str, "%2.0f", humidity);
-	u8g2_DrawStr(&u8g2, 28 + 0, 24, number_str);
+	sprintf(number_str, "%2.0f|%2.0f", temperature, humidity);
+	u8g2_DrawStr(&u8g2, 28, 24, number_str);
 	u8g2_SendBuffer(&u8g2);
 }
 
@@ -128,14 +122,14 @@ void display_error(uint8_t retry, esp_err_t err) {
 	u8g2_SetFont(&u8g2, u8g2_font_inb16_mr);
 
 	switch (retry) {
-		case 2:
-			sprintf(number_str, "!!%d", err);
+		case 0:
+			sprintf(number_str, "E%d", err);
 			break;
 		case 1:
 			sprintf(number_str, "!!!%d", err);
 			break;
-		case 0:
-			sprintf(number_str, "ERR%d", err);
+		case 2:
+			sprintf(number_str, "!!%d", err);
 			break;
 		default:
 			sprintf(number_str, "!%d", err);

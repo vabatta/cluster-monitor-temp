@@ -13,39 +13,49 @@
 
 #include "i2c.h"
 #include "display.h"
+#include "storage.h"
+#include "wifi.h"
+#include "http.h"
+#include "sensor.h"
 
 static const char *TAG = "app_main";
 
-i2c_master_bus_handle_t i2c_mbus = NULL;
+static i2c_master_bus_handle_t i2c_mbus = NULL;
 
-sht4x_t term;
+static sensor_t thermostat;
 
 void app_main(void)
 {
-	ESP_ERROR_CHECK(i2c_master_init(&i2c_mbus));
-	ESP_ERROR_CHECK(display_init(i2c_mbus));
-	ESP_ERROR_CHECK(sht4x_init(&term, i2c_mbus, SHT40_I2C_ADDR_44));
+	i2c_master_init(&i2c_mbus);
+	display_init(i2c_mbus);
+	ESP_ERROR_CHECK(sht4x_init(&thermostat.sensor, i2c_mbus, SHT40_I2C_ADDR_44));
+	storage_init();
+	wifi_sta_init();
+	http_init(&thermostat);
 
 	int backoff = 1000;
 	uint8_t failover = 3;
-	float temperature = 0.0f;
-	float humidity = 0.0f;
+	thermostat.temperature = 0.0f;
+	thermostat.humidity = 0.0f;
 	while (true) {
-		esp_err_t err = sht4x_measure_high_precision(&term, &temperature, &humidity);
+		esp_err_t err = sht4x_measure_high_precision(&thermostat.sensor, &thermostat.temperature, &thermostat.humidity);
 		if (err != ESP_OK) {
+			failover = failover - 1;
 			ESP_LOGE(TAG, "Failed to read from SHT4X sensor (left %d, code %d)", failover, err);
 			display_error(failover, err);
+			thermostat.err = err;
 
-			if (--failover == 0) {
+			if (failover == 0) {
 				ESP_LOGE(TAG, "Unable to recover, shutting down");
 				break;
 			} else {
-				// ESP_LOGD(TAG, "Backing off to %d ms", backoff);
-				backoff = backoff << 2;
+				backoff = backoff << 1;
+				ESP_LOGD(TAG, "Backing off with %d ms", backoff);
 			}
 		}
 		else {
-			display_temperature(temperature);
+			display_sensor(thermostat.temperature, thermostat.humidity);
+			thermostat.err = ESP_OK;
 			backoff = 1000;
 		}
 
